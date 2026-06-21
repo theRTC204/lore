@@ -2884,6 +2884,36 @@ pub(crate) async fn weave_history(
     Ok(())
 }
 
+/// Resolve the commit timestamp from an optional `LORE_P4_TIMESTAMP` override.
+///
+/// The override is unix **seconds** (the unit of P4's `describe` `time` field),
+/// while Lore stores `timestamp` metadata in **milliseconds** — so the parsed
+/// value is multiplied by 1000 to match `util::time::timestamp()`. An absent or
+/// empty override falls back to `fallback`; a non-empty value that does not
+/// parse as a `u64` (or that overflows when scaled to milliseconds) is rejected
+/// as invalid input.
+fn resolve_p4_timestamp(
+    raw: Option<&str>,
+    fallback: impl FnOnce() -> u64,
+) -> Result<u64, CommitError> {
+    match raw.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) => {
+            let seconds = u64::from_str(s).map_err(|_| invalid_p4_timestamp(s))?;
+            seconds
+                .checked_mul(1000)
+                .ok_or_else(|| invalid_p4_timestamp(s))
+        }
+        None => Ok(fallback()),
+    }
+}
+
+fn invalid_p4_timestamp(value: &str) -> CommitError {
+    InvalidArguments {
+        reason: format!("LORE_P4_TIMESTAMP is not a valid u64 unix timestamp (seconds): '{value}'"),
+    }
+    .into()
+}
+
 pub async fn prepare_commit_metadata(
     repository: Arc<RepositoryContext>,
     metadata: Metadata,
@@ -2896,8 +2926,17 @@ pub async fn prepare_commit_metadata(
     let mut metadata = metadata;
 
     // Set metadata for revision, overwriting any existing value
-    let commit_timestamp = util::time::timestamp();
-    let commit_user = execution_context().user_id().await;
+    // P4 import overrides — all opt-in. Absence preserves upstream behavior.
+    let commit_timestamp = resolve_p4_timestamp(
+        std::env::var("LORE_P4_TIMESTAMP").ok().as_deref(),
+        util::time::timestamp,
+    )?;
+    let p4_user = std::env::var("LORE_P4_USER").unwrap_or_default();
+    let commit_user = if !p4_user.is_empty() {
+        p4_user
+    } else {
+        execution_context().user_id().await
+    };
     let commit_changelist = std::env::var("LORE_P4_CHANGELIST").unwrap_or_default();
 
     metadata
@@ -3138,5 +3177,37 @@ mod tests {
         .into();
         assert!(matches!(err, CommitError::NotALayer { .. }));
         assert!(err.to_string().contains("external/lib"));
+    }
+
+    #[test]
+    fn resolve_p4_timestamp_absent_uses_fallback() {
+        let ts = resolve_p4_timestamp(None, || 1234).unwrap();
+        assert_eq!(ts, 1234);
+    }
+
+    #[test]
+    fn resolve_p4_timestamp_empty_uses_fallback() {
+        assert_eq!(resolve_p4_timestamp(Some(""), || 1234).unwrap(), 1234);
+        assert_eq!(resolve_p4_timestamp(Some("   "), || 1234).unwrap(), 1234);
+    }
+
+    #[test]
+    fn resolve_p4_timestamp_valid_overrides_fallback() {
+        // Input is unix seconds; stored value is milliseconds.
+        let ts = resolve_p4_timestamp(Some(" 1700000000 "), || 1234).unwrap();
+        assert_eq!(ts, 1_700_000_000_000);
+    }
+
+    #[test]
+    fn resolve_p4_timestamp_malformed_is_rejected() {
+        let err = resolve_p4_timestamp(Some("not-a-number"), || 1234).unwrap_err();
+        assert!(matches!(err, CommitError::InvalidArguments { .. }));
+        assert!(err.to_string().contains("not-a-number"));
+    }
+
+    #[test]
+    fn resolve_p4_timestamp_overflow_is_rejected() {
+        let err = resolve_p4_timestamp(Some(&u64::MAX.to_string()), || 1234).unwrap_err();
+        assert!(matches!(err, CommitError::InvalidArguments { .. }));
     }
 }
