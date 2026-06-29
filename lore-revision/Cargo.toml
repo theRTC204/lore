@@ -34,10 +34,12 @@ parking_lot = { workspace = true }
 prost-types = { workspace = true }
 quinn = { workspace = true }
 rand = { workspace = true }
+reqwest = { workspace = true }
 ring = { workspace = true }
 rustls = { workspace = true }
 rustls-native-certs = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde_with = { workspace = true }
 smallvec = { workspace = true }
 thiserror = { workspace = true }

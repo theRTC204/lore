@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::interface::LoreString;
 
 pub mod login;
+pub mod oidc;
 pub mod userinfo;
 
 /////////////////////////////////

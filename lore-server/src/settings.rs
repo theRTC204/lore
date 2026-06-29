@@ -224,6 +224,12 @@ pub struct AuthSettings {
     pub jwk: Option<JWKServiceSettings>,
     pub jwt_audience: Option<Vec<String>>,
     pub jwt_issuer: Option<String>,
+    /// Authorization policy. `"resources"` (default) requires a Lore `resources`
+    /// claim scoping the token to repositories. `"trust_authenticated"` authorizes
+    /// any token that passes signature/issuer/audience verification for all
+    /// repositories — used with external IdPs (e.g. Microsoft Entra) whose tokens
+    /// carry no Lore-minted `resources` claim.
+    pub authorization_mode: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

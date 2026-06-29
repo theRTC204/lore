@@ -257,6 +257,15 @@ pub async fn interactive(
         ));
     }
 
+    // External OpenID Connect providers (e.g. Microsoft Entra) don't implement the
+    // UCS Auth API; run a standard authorization-code + PKCE flow instead.
+    if authentication::parse_scheme(&auth_url)
+        .map(|s| s == crate::auth::oidc::OIDC_SCHEME)
+        .unwrap_or(false)
+    {
+        return crate::auth::oidc::interactive_login(&auth_url, &remote_url, no_browser).await;
+    }
+
     let auth_impl = authentication::find(&auth_url)
         .forward::<InteractiveLoginError>("finding authentication handler")?;
     let correlation_id = crate::lore::execution_context()

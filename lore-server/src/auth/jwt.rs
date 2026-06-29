@@ -30,8 +30,14 @@ pub struct JWTUserInfo {
     #[serde_as(as = "OneOrMany<_, PreferMany>")]
     #[serde(rename = "aud")]
     pub audience: Vec<String>,
+    // `env`/`name`/`preferred_username` are Lore-minted claims absent from external
+    // IdP tokens (e.g. Microsoft Entra ID tokens). Default them so such tokens still
+    // deserialize; issuer/audience/exp remain enforced in `verify_token_internal`.
+    #[serde(default)]
     pub env: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub preferred_username: String,
     pub is_service_account: Option<bool>,
     #[serde(rename = "exp")]
@@ -69,8 +75,13 @@ pub struct AuthorizationToken {
     #[serde_as(as = "OneOrMany<_, PreferMany>")]
     #[serde(rename = "aud")]
     pub audience: Vec<String>,
+    // Lore-minted claims absent from external IdP tokens (e.g. Microsoft Entra);
+    // defaulted so those tokens deserialize. See `JWTUserInfo` above.
+    #[serde(default)]
     pub env: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub preferred_username: String,
     pub resources: Option<Vec<ResourcePermission>>,
     pub groups: Option<Vec<String>>,
@@ -95,6 +106,11 @@ pub struct JwtVerifier {
     pub jwk_service: Arc<dyn JWKService>,
     pub jwt_issuer: Option<String>,
     pub jwt_audience: Option<Vec<String>>,
+    /// When true, any token that passes signature/issuer/audience verification is
+    /// authorized for all repositories, regardless of the Lore `resources` claim.
+    /// Used for external IdPs (e.g. Microsoft Entra) whose tokens carry no
+    /// Lore-minted `resources`. Defaults to false (resource-scoped authorization).
+    pub trust_authenticated: bool,
 }
 
 impl JwtVerifier {
@@ -406,6 +422,7 @@ mod tests {
                 jwk_service: Arc::new(service),
                 jwt_issuer: None,
                 jwt_audience: Some(vec!["urc.example.com".to_string(), "URC_test".to_string()]),
+                trust_authenticated: false,
             };
 
             let authn_string_audience = json!({
@@ -445,6 +462,7 @@ mod tests {
                 jwk_service: Arc::new(service),
                 jwt_issuer: None,
                 jwt_audience: Some(vec!["urc.example.com".to_string(), "URC_test".to_string()]),
+                trust_authenticated: false,
             };
 
             let base_authz_token = mock_authz_token(vec!["URC_test".to_string()]);
@@ -481,6 +499,7 @@ mod tests {
                 jwk_service: Arc::new(service),
                 jwt_issuer: None,
                 jwt_audience: Some(vec!["urc.example.com".to_string(), "Lore".to_string()]),
+                trust_authenticated: false,
             };
             let (original_authz_token, encoded_authz_token) =
                 make_authz_token_with_audience(vec!["Lore".to_string()]);
@@ -515,6 +534,7 @@ mod tests {
                 jwk_service: Arc::new(service),
                 jwt_issuer: None,
                 jwt_audience: Some(common_audience.clone()),
+                trust_authenticated: false,
             };
 
             let (original_token, encoded_token) = make_authz_token_with_audience(common_audience);
@@ -540,6 +560,7 @@ mod tests {
                 jwk_service: Arc::new(service),
                 jwt_issuer: None,
                 jwt_audience: Some(vec!["Lore".to_string()]),
+                trust_authenticated: false,
             };
 
             let (original_token, encoded_token) = make_authz_token_with_audience(vec![
@@ -567,6 +588,7 @@ mod tests {
                 jwk_service: Arc::new(service),
                 jwt_issuer: None,
                 jwt_audience: Some(vec!["skein".to_string()]),
+                trust_authenticated: false,
             };
 
             let (_, encoded_token) = make_authz_token_with_audience(vec!["Lore".to_string()]);
@@ -576,6 +598,49 @@ mod tests {
                 verify_error,
                 JwtVerifierError::ValidationFailed(_)
             ));
+
+            Ok(())
+        }
+
+        // An external-IdP (e.g. Microsoft Entra) ID token carries no Lore-minted
+        // `env`/`name`/`preferred_username`/`resources` claims. With those defaulted,
+        // verification must still succeed (issuer/audience/exp remain enforced).
+        #[tokio::test]
+        async fn verify_entra_style_token_without_lore_claims() -> Result<(), Box<dyn Error>> {
+            let mut service = MockTestJWKService::new();
+            service.expect_get_key().returning(|_| {
+                Ok((
+                    DecodingKey::from_secret(AGREED_UPON_SIGNING_SECRET.as_ref()),
+                    AGREED_UPON_ALGORITHM,
+                ))
+            });
+
+            let verifier = JwtVerifier {
+                jwk_service: Arc::new(service),
+                jwt_issuer: Some("https://login.microsoftonline.com/tenant/v2.0".to_string()),
+                jwt_audience: Some(vec!["client-id".to_string()]),
+                trust_authenticated: true,
+            };
+
+            // Only the claims an Entra ID token actually carries — no env/resources.
+            let entra_token = json!({
+                "sub": "00000000-0000-0000-0000-000000000001",
+                "iss": "https://login.microsoftonline.com/tenant/v2.0",
+                "iat": 1,
+                "aud": "client-id",
+                "exp": SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .add(Duration::from_secs(5))
+                    .as_secs(),
+            });
+            let encoded = encode_jwt(&entra_token);
+
+            let verified = verifier.verify_token(&encoded).await?;
+            assert_eq!(verified.user_id, "00000000-0000-0000-0000-000000000001");
+            assert_eq!(verified.env, "");
+            assert_eq!(verified.audience, vec!["client-id".to_string()]);
+            assert!(verified.resources.is_none());
 
             Ok(())
         }

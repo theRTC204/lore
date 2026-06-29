@@ -2750,6 +2750,7 @@ dependencies = [
  "prost-types",
  "quinn",
  "rand",
+ "reqwest",
  "ring",
  "rustls",
  "rustls-native-certs",

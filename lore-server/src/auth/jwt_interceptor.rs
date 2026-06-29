@@ -44,9 +44,14 @@ impl Interceptor for JWTInterceptor {
                 .map_err(|e| tonic::Status::permission_denied(format!("Not allowed ({e:?})")))?;
         add_auth_fields_to_current_span(&authorization);
 
-        let repository = get_repository(request.metadata()).unwrap_or_default();
-        verify_authorization(&authorization, repository)
-            .map_err(|_err| tonic::Status::permission_denied("Unauthorized"))?;
+        // In `trust_authenticated` mode (external IdPs like Entra), a token that
+        // passes signature/issuer/audience verification is authorized for all
+        // repositories; it carries no Lore `resources` claim to check.
+        if !self.jwt_verifier.trust_authenticated {
+            let repository = get_repository(request.metadata()).unwrap_or_default();
+            verify_authorization(&authorization, repository)
+                .map_err(|_err| tonic::Status::permission_denied("Unauthorized"))?;
+        }
 
         request.extensions_mut().insert(authorization);
 

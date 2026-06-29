@@ -90,6 +90,28 @@ pub async fn exchange(
         return Err(NotAuthenticated.into());
     }
 
+    // OpenID Connect / external-IdP auth URLs (scheme `oidc`) have no token-exchange
+    // service. The IdP-issued user token is presented directly to the Lore server,
+    // which validates it and authorizes it via `trust_authenticated`. Use the stored
+    // user token as the authorization token rather than attempting a UCS exchange.
+    if authentication::parse_scheme(auth_url).map(|s| s == "oidc").unwrap_or(false) {
+        let Some(user) = lore_credential::user_info(
+            auth_url,
+            identity,
+            tokens_only_for_recipient_domain(recipient_domain.clone()),
+        )
+        .await
+        else {
+            lore_debug!("OIDC: no stored user token for identity {identity}");
+            return Err(NotAuthenticated.into());
+        };
+        if is_expired(user.expires) {
+            lore_debug!("OIDC: stored user token for {identity} is expired");
+            return Err(NotAuthenticated.into());
+        }
+        return Ok(user.token);
+    }
+
     let auth_domain = get_domain_or_empty(auth_url);
     let auth_url = auth_url.to_string();
     let repo_id_str = repository.to_string();

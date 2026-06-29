@@ -1743,10 +1743,19 @@ async fn async_main(settings: (Settings, StringHash), config: ServerConfig) -> R
                 jwk_service
                     .fetch_new_keys(None /* fetch all keys */)
                     .await?;
+                let trust_authenticated =
+                    auth.authorization_mode.as_deref() == Some("trust_authenticated");
+                if trust_authenticated {
+                    tracing::warn!(
+                        "Auth authorization_mode = trust_authenticated: any token passing \
+                         signature/issuer/audience verification is authorized for all repositories"
+                    );
+                }
                 let jwt_verifier = JwtVerifier {
                     jwk_service: Arc::new(jwk_service),
                     jwt_issuer: auth.jwt_issuer.clone(),
                     jwt_audience: auth.jwt_audience.clone(),
+                    trust_authenticated,
                 };
                 Some(jwt_verifier)
             }
