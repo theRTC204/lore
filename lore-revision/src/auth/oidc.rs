@@ -49,7 +49,6 @@ struct OidcDiscovery {
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
     id_token: Option<String>,
-    #[allow(dead_code)]
     refresh_token: Option<String>,
 }
 
@@ -333,6 +332,16 @@ pub async fn interactive_login(
     )
     .await
     .forward::<InteractiveLoginError>("storing OIDC token")?;
+
+    // Store the refresh token (issued when `offline_access` is granted) so the
+    // transport layer can silently obtain a new ID token when this one expires,
+    // instead of forcing an interactive re-login.
+    if let Some(refresh_token) = token_response.refresh_token
+        && let Err(e) =
+            token_store::store_refresh_token(auth_url, user_info.id.as_str(), &refresh_token).await
+    {
+        lore_debug!("Failed to store OIDC refresh token for {}: {e}", user_info.id);
+    }
 
     lore_debug!("OIDC login successful for {}", user_info.id);
     Ok(user_info)

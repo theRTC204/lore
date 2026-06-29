@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Epic Games, Inc.
 // SPDX-License-Identifier: MIT
 pub mod exchange;
+pub mod oidc;
 pub mod ucs_auth;
 
 use std::collections::HashMap;

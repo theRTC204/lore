@@ -445,13 +445,57 @@ pub async fn auth_exchange(
     (String::new(), String::new(), String::new())
 }
 
+/// Attempts to refresh an expired OIDC authentication token using the stored
+/// refresh token. On success, stores the new ID token (and rotated refresh token)
+/// and returns the new ID token. Returns `None` for non-OIDC auth URLs, when no
+/// refresh token is stored, or when the provider refresh fails.
+async fn try_oidc_refresh(
+    auth_url: &str,
+    identity: &str,
+    remote_domain: &str,
+) -> Option<String> {
+    if !authentication::parse_scheme(auth_url)
+        .map(|s| s == crate::auth::oidc::OIDC_SCHEME)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
+    let refresh_token = token_store::load_refresh_token(auth_url, identity)
+        .await
+        .ok()?;
+    let refreshed = crate::auth::oidc::refresh(auth_url, &refresh_token).await?;
+
+    // Store the new ID token bound to the same recipient domain, then the rotated
+    // refresh token (store_user_token preserves the prior refresh token, so the
+    // refresh-token write must come second to overwrite it).
+    if let Err(err) = token_store::store_user_token(
+        auth_url,
+        identity,
+        &refreshed.id_token,
+        vec![remote_domain.to_string()],
+    )
+    .await
+    {
+        lore_warn!("Failed to store refreshed OIDC token: {err}");
+        return None;
+    }
+    if let Some(new_refresh) = refreshed.refresh_token
+        && let Err(err) = token_store::store_refresh_token(auth_url, identity, &new_refresh).await
+    {
+        lore_warn!("Failed to store rotated OIDC refresh token: {err}");
+    }
+
+    Some(refreshed.id_token)
+}
+
 async fn auth_exchange_for_identity(
     auth_url: &str,
     remote_domain: &str,
     identity: &str,
     repository: RepositoryId,
 ) -> (String, String, String) {
-    let Ok(authentication_token) = token_store::load_user_token(
+    let Ok(mut authentication_token) = token_store::load_user_token(
         auth_url,
         identity,
         tokens_only_for_recipient_domain(remote_domain.to_string()),
@@ -462,12 +506,21 @@ async fn auth_exchange_for_identity(
         return (String::new(), String::new(), String::new());
     };
 
-    // Reject expired authn tokens
+    // Reject expired authn tokens. For OIDC providers, first try a silent
+    // refresh-token grant so an expired ID token doesn't force a re-login.
     if let Some(info) = lore_credential::user_info_from_token(authentication_token.clone())
         && is_expired(info.expires)
     {
-        lore_debug!("Skipping identity {identity}, authn token is expired");
-        return (String::new(), String::new(), String::new());
+        match try_oidc_refresh(auth_url, identity, remote_domain).await {
+            Some(refreshed) => {
+                lore_debug!("Refreshed expired OIDC token for {identity}");
+                authentication_token = refreshed;
+            }
+            None => {
+                lore_debug!("Skipping identity {identity}, authn token is expired");
+                return (String::new(), String::new(), String::new());
+            }
+        }
     }
 
     // This will return the cached authz token if it is still valid,
