@@ -23,6 +23,19 @@ use crate::grpc::ServerResultExt;
 
 type LoreAuthApiResult<T> = Result<Response<T>, Status>;
 
+/// Returns the auth-service URL to use for UCS permission lookups/registration,
+/// or `None` when the configured provider has no such gRPC service.
+///
+/// External OpenID Connect providers (advertised with an `oidc://` auth URL, e.g.
+/// Microsoft Entra) don't implement the UCS Auth API. Repository handlers that
+/// would otherwise call the auth service (list/query/get/create/delete) treat a
+/// `None` here as "no per-resource authorization service" and rely on the JWT
+/// interceptor's `trust_authenticated` mode instead. Without this, those handlers
+/// try to speak gRPC to the IdP and fail with an HTTP/2 framing error.
+pub(crate) fn auth_service_url(auth_url: Option<String>) -> Option<String> {
+    auth_url.filter(|url| !url.starts_with("oidc:"))
+}
+
 pub struct LoreAuthClientHelper {
     client: UrcAuthApiClient<InterceptedService<tonic::transport::Channel, CorrelationInterceptor>>,
 }

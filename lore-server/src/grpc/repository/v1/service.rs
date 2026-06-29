@@ -79,12 +79,15 @@ impl LoreRepositoryV1Service {
         }
     }
 
-    /// Auth-service URL extracted from the environment, if configured.
+    /// Auth-service URL extracted from the environment, if configured. Resolves to
+    /// `None` for providers without a UCS permissions service (e.g. `oidc://`).
     fn auth_url(&self) -> Option<String> {
-        self.environment
-            .endpoint
-            .clone()
-            .and_then(|endpoint| endpoint.auth_url)
+        crate::authnz::auth::auth_service_url(
+            self.environment
+                .endpoint
+                .clone()
+                .and_then(|endpoint| endpoint.auth_url),
+        )
     }
 }
 

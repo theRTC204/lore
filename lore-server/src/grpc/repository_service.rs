@@ -62,10 +62,12 @@ impl RepositoryService for LoreRepositoryService {
             self.rpc_timeout,
             repository_create::handler(
                 request,
-                self.environment
-                    .endpoint
-                    .clone()
-                    .and_then(|endpoint| endpoint.auth_url),
+                crate::authnz::auth::auth_service_url(
+                    self.environment
+                        .endpoint
+                        .clone()
+                        .and_then(|endpoint| endpoint.auth_url),
+                ),
                 self.immutable_store.clone(),
                 self.mutable_store.clone(),
                 &self.hook_dispatcher,
@@ -83,10 +85,12 @@ impl RepositoryService for LoreRepositoryService {
             self.rpc_timeout,
             repository_delete::handler(
                 request,
-                self.environment
-                    .endpoint
-                    .clone()
-                    .and_then(|endpoint| endpoint.auth_url),
+                crate::authnz::auth::auth_service_url(
+                    self.environment
+                        .endpoint
+                        .clone()
+                        .and_then(|endpoint| endpoint.auth_url),
+                ),
                 self.immutable_store.clone(),
                 self.mutable_store.clone(),
                 self,
@@ -103,10 +107,12 @@ impl RepositoryService for LoreRepositoryService {
             self.rpc_timeout,
             repository_query::handler(
                 request,
-                self.environment
-                    .endpoint
-                    .clone()
-                    .and_then(|endpoint| endpoint.auth_url),
+                crate::authnz::auth::auth_service_url(
+                    self.environment
+                        .endpoint
+                        .clone()
+                        .and_then(|endpoint| endpoint.auth_url),
+                ),
                 self.immutable_store.clone(),
                 self.mutable_store.clone(),
             ),
@@ -122,10 +128,12 @@ impl RepositoryService for LoreRepositoryService {
             self.rpc_timeout,
             repository_list::handler(
                 request,
-                self.environment
-                    .endpoint
-                    .clone()
-                    .and_then(|endpoint| endpoint.auth_url),
+                crate::authnz::auth::auth_service_url(
+                    self.environment
+                        .endpoint
+                        .clone()
+                        .and_then(|endpoint| endpoint.auth_url),
+                ),
                 self.immutable_store.clone(),
                 self.mutable_store.clone(),
             ),
