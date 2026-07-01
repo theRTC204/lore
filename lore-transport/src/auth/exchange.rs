@@ -461,10 +461,21 @@ async fn try_oidc_refresh(
         return None;
     }
 
-    let refresh_token = token_store::load_refresh_token(auth_url, identity)
-        .await
-        .ok()?;
-    let refreshed = crate::auth::oidc::refresh(auth_url, &refresh_token).await?;
+    let refresh_token = match token_store::load_refresh_token(auth_url, identity).await {
+        Ok(token) => token,
+        Err(_) => {
+            lore_debug!(
+                "OIDC refresh: no stored refresh token for {identity}; re-login required \
+                 (was this identity logged in with a client that supports refresh?)"
+            );
+            return None;
+        }
+    };
+    let Some(refreshed) = crate::auth::oidc::refresh(auth_url, &refresh_token).await else {
+        lore_warn!("OIDC refresh: provider refresh request failed for {identity}");
+        return None;
+    };
+    lore_debug!("OIDC refresh: obtained new token for {identity}");
 
     // Store the new ID token bound to the same recipient domain, then the rotated
     // refresh token (store_user_token preserves the prior refresh token, so the
