@@ -607,6 +607,30 @@ async fn resolve_auth_endpoint(
         }
     }
 
+    // Fall back to a stored identity's auth endpoint. This lets commands like
+    // `lore auth info` run outside a repository — the repo-remote lookup above
+    // can't resolve an endpoint there, but the token store already knows which
+    // auth service the user authenticated against. Authentication tokens have an
+    // empty `resource`.
+    if let Ok(identities) = lore_credential::token_store::load_all_identities(false).await {
+        let mut auth_urls: Vec<String> = identities
+            .into_iter()
+            .filter(|identity| identity.resource.is_empty())
+            .map(|identity| identity.auth_url)
+            .collect();
+        auth_urls.sort();
+        auth_urls.dedup();
+
+        if auth_urls.len() == 1 {
+            return Ok(auth_urls.into_iter().next().unwrap_or_default());
+        }
+        if auth_urls.len() > 1 {
+            return Err(AuthStoreError::internal(
+                "Multiple auth endpoints stored; run inside a repository or pass an explicit auth URL",
+            ));
+        }
+    }
+
     Err(AuthStoreError::internal("No auth endpoint available"))
 }
 
